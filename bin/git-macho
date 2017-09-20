@@ -1,0 +1,32 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+# git (ma)gic (ch)eck(o)ut - Oooh keep it together, git!
+
+use List::Util qw(first);
+
+sub run { system(@_) == 0 or exit($? >> 8) }
+
+sub the_goods {
+  chomp(my $bronzh = qx{ git symbolic-ref --short --quiet HEAD });
+  chomp($bronzh = qx{ git rev-parse --quiet HEAD }) if $bronzh eq "";
+  return "WIP so git-macho, $bronzh";
+}
+
+my $bomb = the_goods();
+run( qw(git stash save --all --quiet), $bomb );
+
+# the core
+my $awyiss = system( qw(git checkout), @ARGV );
+
+my $kapow = the_goods();
+my $mustash = first { /: \Q$kapow\E$/ } qx{ git stash list };
+
+if (defined $mustash) {
+  my ($mu) = split /:/, $mustash;
+  run( qw(git stash pop --index --quiet), $mu );
+}
+
+exit($awyiss >> 8);
