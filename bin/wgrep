@@ -1,0 +1,64 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+my $failed = 0;
+my ($cur_file, $ED);
+
+my $trim_end = 1;
+if (@ARGV && $ARGV[0] eq "-a") {
+  $trim_end = 0;
+  shift @ARGV;
+}
+
+while (<>) {
+    chomp;
+    s{\s+$}{} if $trim_end;
+
+    my $orig = $_;
+    my $is_grep_line = s{^([^:]+?)[-:](\d+)[-:](?:\d+[-:])?}{};
+    my $file = $1;
+    my $lnum = $2;
+
+    next unless /\S/;
+
+    if ($is_grep_line) {
+        if (!defined($cur_file) || $file ne $cur_file) {
+            if (defined($cur_file) && $ED) {
+                print $ED "w\n";
+                close $ED;
+                warn "Wrote: $cur_file\n";
+                $ED = undef;
+            }
+
+            if (-f $file && -r _ && -w _) {
+                open($ED, "|-", qw(ed -s), $file) or do {
+                  $ED = undef;
+                };
+            }
+
+            unless ($ED) {
+                $failed = 1;
+                warn "Error: Cannot modify $file\n";
+            }
+        }
+
+        $cur_file = $file;
+
+        if ($ED) {
+            print $ED $lnum . "c\n", "$_\n", ".\n";
+            next;
+        }
+    }
+
+    warn "Skipped: $orig\n";
+}
+
+if ($ED) {
+    print $ED "w\n";
+    close $ED;
+    warn "Wrote: $cur_file\n";
+}
+
+exit $failed;
