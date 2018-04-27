@@ -1,0 +1,77 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+use File::Basename qw(basename);
+use File::Temp qw(tempfile);
+
+sub run { system(@_) == 0 or exit($? >> 8) }
+
+if ($ENV{GIT_COMMIT_FIX_TARGET}) {
+    my ($rebase_file) = @ARGV;
+
+    if (basename($rebase_file) ne "git-rebase-todo") {
+        exec(($ENV{EDITOR} || "vim"), @ARGV);
+    }
+
+    if (!$ENV{GIT_COMMIT_FIX_EDIT}) {
+        exec "touch", @ARGV;
+    }
+
+    open(my $REBASE, "<", $rebase_file)
+      or die "Cannot read $rebase_file : $!\n";
+
+    my ($OUT, $out_file) = tempfile();
+
+    while (<$REBASE>) {
+        if (/^pick ([a-f0-9]+) (.*)/) {
+            $_ = "edit $1 $2\n" if index($ENV{GIT_COMMIT_FIX_TARGET}, $1) == 0;
+        }
+
+        print $OUT $_;
+    }
+
+    close $OUT;
+    close $REBASE;
+
+    run( "mv", $out_file, $rebase_file );
+
+    exit 0;
+}
+
+my $is_edit = 0;
+my $fixup_opt = "fixup";
+my $target;
+
+for my $arg (@ARGV) {
+    if ($arg =~ /^(--edit|-e)$/) {
+        $is_edit = 1;
+    } elsif ($arg =~ /^(--squash|-s)$/) {
+        $fixup_opt = "squash";
+    } else {
+        $target = $arg;
+    }
+}
+
+die "Usage: git commit-fix [-e] <commit>\n" unless defined $target;
+
+my $is_commit = do {
+    chomp(my $type = qx{ git cat-file -t '$target' 2> /dev/null });
+    ( $type eq "commit" );
+};
+die "Not a valid commit: $target\n" unless $is_commit;
+
+chomp($target = qx{ git rev-list -n 1 '$target' });
+
+if (system( qw(git diff --cached --quiet) ) != 0) {
+    run( qw(git commit), "--$fixup_opt", $target );
+}
+
+run( qw(git stash save -a) );
+
+$ENV{GIT_COMMIT_FIX_TARGET} = $target;
+$ENV{GIT_COMMIT_FIX_EDIT} = $is_edit;
+$ENV{GIT_EDITOR} = $0; # usurp rebase editing
+
+exec qw(git rebase -i --autosquash), "$target~1";
